@@ -1,10 +1,20 @@
-from pymunk.vec2d import Vec2d
-import math
+# /// script
+# dependencies = [
+#  "pygame-ce",
+#  "cffi",
+#  "pymunk",
+# ]
+# ///
 import pymunk
-import typing as t
 import pygame
+from pymunk.vec2d import Vec2d
+import asyncio
+import math
+import typing as t
 import pymunk.pygame_util
 import random
+
+IS_EMSCRIPTEN = False
 
 WIDTH : int = 1500
 HEIGHT : int = 750
@@ -161,7 +171,7 @@ def drawWinner(space : pymunk.Space, shape : pymunk.Shape, winner_index: int) ->
     space.add(body, new_shape)
     return new_shape
 
-def main():
+async def main():
     pygame.init()
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
     clock = pygame.time.Clock()
@@ -187,7 +197,10 @@ def main():
     red_segment.color = pygame.Color("Red")
     space.add(red_segment)
 
-    space.on_collision(1, 2, on_red_segment_hits_marble)
+    # emscripten version uses pymunk 6.4, which doesn't
+    # have on_collision :-(
+    if not IS_EMSCRIPTEN:
+        space.on_collision(1, 2, on_red_segment_hits_marble)
 
     platform_body = pymunk.Body(body_type=pymunk.Body.KINEMATIC)
     platform_body.position = (700, 350)
@@ -205,8 +218,46 @@ def main():
                 running = False
         screen.fill((255, 255, 255))
         space.step(1/60)
-        space.debug_draw(draw_options)
+        if not IS_EMSCRIPTEN:
+            space.debug_draw(draw_options)
         pygame.display.flip()
+        if IS_EMSCRIPTEN:
+            for shape in space.shapes:
+                body = shape.body
+                if body:
+                    pos = int(body.position.x), int(body.position.y)
+                    
+                    if isinstance(shape, pymunk.Circle):
+                        # Draw circle
+                        pygame.draw.circle(screen, shape.color, pos, int(shape.radius))
+
+                        #     # Draw a line to show rotation
+                        #     angle = body.angle
+                        #     end_pos = (
+                        #         int(pos[0] + math.cos(angle) * shape.radius),
+                        #         int(pos[1] + math.sin(angle) * shape.radius)
+                        #     )
+                        #     pygame.draw.line(screen, BLACK, pos, end_pos, 2)
+                    elif isinstance(shape, pymunk.Poly):
+                        # Draw polygon (box)
+                        vertices = []
+                        for v in shape.get_vertices():
+                            x, y = v.rotated(body.angle) + body.position
+                            vertices.append((int(x), int(y)))
+                        pygame.draw.polygon(screen, shape.color, vertices)
+                    if isinstance(shape, pymunk.Segment):
+                        start = shape.a.rotated(body.angle) + body.position
+                        end = shape.b.rotated(body.angle) + body.position
+                        # use green if moving, gray if not
+                        if hasattr(shape, 'color'):
+                            color = shape.color
+                        else:
+                            color = (0, 200, 0) if body.body_type == pymunk.Body.KINEMATIC else (140, 140, 140)
+                        pygame.draw.line(screen, color, start, end, int(shape.radius))
+
+            pygame.display.update()
+            await asyncio.sleep(0)
+
         clock.tick(60)
 
         # Move platform back and forth
@@ -227,8 +278,7 @@ def main():
                 if random_marble == m:
                     random_marble = new_marble
 
-
     pygame.quit()
 
-if __name__ == "__main__":
-    main()
+if IS_EMSCRIPTEN or __name__ == "__main__":
+    asyncio.run(main())
